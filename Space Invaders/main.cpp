@@ -10,6 +10,8 @@
 
 #define GAME_MAX_BULLETS	3
 
+//changes to make still: hit detection for alien bullets, player lives, victory/loss screens, bunkers
+
 struct Alien {
 	size_t x, y; //x, y are pixels from the bottom left corner of the screen
 	uint8_t type;
@@ -37,6 +39,7 @@ struct Game { //this struct holds all game related variables
 	size_t num_aliens;
 	size_t num_bullets;
 	size_t num_player_bullets;
+	size_t num_alien_bullets;
 	Alien* aliens;
 	Player player;
 	Bullet bullets[GAME_MAX_BULLETS + 1];
@@ -45,7 +48,6 @@ struct Game { //this struct holds all game related variables
 bool game_running = false; //game_running will allow the game to be quit when the esc key is pressed
 int move_dir = 0; //variable for player movement direction (+1 is right arrow, -1 is left arrow)
 bool fire_pressed = 0; //boolean for if firing button (space) was pressed
-bool alien_fire = 0;
 
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Error: %s\n", description);
@@ -58,7 +60,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 			break;
 		case GLFW_KEY_RIGHT:
 			if (action == GLFW_PRESS) move_dir += 1; //if both keys are pressed, we want the player to not move so we add instead of setting
-			else if (action == GLFW_RELEASE) move_dir -= 1; //want player to stop of key is released
+			else if (action == GLFW_RELEASE) move_dir -= 1; //want player to stop if key is released
 			break;
 		case GLFW_KEY_LEFT:
 			if (action == GLFW_PRESS) move_dir -= 1;
@@ -316,29 +318,9 @@ int main(int argc, char* argv[]) {
 	text_spritesheet.width = 5;
 	text_spritesheet.height = 7;
 	text_spritesheet.data = new uint8_t[65 * 35]{
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-
-		0,0,1,0,0,
-		0,0,1,0,0,
-		0,0,1,0,0,
-		0,0,1,0,0,
-		0,0,1,0,0,
-		0,0,0,0,0,
-		0,0,1,0,0,
-
-		0,1,0,1,0,
-		0,1,0,1,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
+		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,
+		0,1,0,1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 		0,1,0,1,0,0,1,0,1,0,1,1,1,1,1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,0,0,1,0,1,0,
 		0,0,1,0,0,0,1,1,1,0,1,0,1,0,0,0,1,1,1,0,0,0,1,0,1,0,1,1,1,0,0,0,1,0,0,
 		1,1,0,1,0,1,1,0,1,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,1,0,1,1,0,1,0,1,1,
@@ -439,6 +421,7 @@ int main(int argc, char* argv[]) {
 	game.num_aliens = 55;
 	game.num_bullets = 0;
 	game.num_player_bullets = 0;
+	game.num_alien_bullets = 0;
 	game.aliens = new Alien[game.num_aliens];
 
 	game.player.x = 112 - 5;
@@ -465,9 +448,8 @@ int main(int argc, char* argv[]) {
 
 	game_running = true;
 
-	uint32_t clear_color = rgb_to_uint32(0, 128, 0);
+	uint32_t clear_color = rgb_to_uint32(0, 0, 0);
 
-	double alien_clock = 0.0;
 	bool aliens_dead = false;
 
 	while (!glfwWindowShouldClose(window) && game_running) {
@@ -475,12 +457,16 @@ int main(int argc, char* argv[]) {
 
 		buffer_clear(&buffer, clear_color); //sets color to clear color, which is green
 
-		buffer_draw_text(&buffer, text_spritesheet, "SCORE", 4, game.height - text_spritesheet.height - 7, rgb_to_uint32(128, 0, 0));
-		buffer_draw_number(&buffer, number_spritesheet, score, 4 + 2 * number_spritesheet.width, game.height - 2 * number_spritesheet.height - 12, rgb_to_uint32(128, 0, 0));
-		buffer_draw_text(&buffer, text_spritesheet, "CREDIT 00", 164, 7, rgb_to_uint32(128, 0, 0));
+		buffer_draw_text(&buffer, text_spritesheet, "SCORE", 4, game.height - text_spritesheet.height - 7, rgb_to_uint32(128, 128, 128));
+		buffer_draw_number(&buffer, number_spritesheet, score, 4 + 2 * number_spritesheet.width, game.height - 2 * number_spritesheet.height - 12, rgb_to_uint32(128, 128, 128));
+		buffer_draw_text(&buffer, text_spritesheet, "CREDIT 00", 164, 7, rgb_to_uint32(128, 128, 128));
+		buffer_draw_text(&buffer, text_spritesheet, "LIVES", 8, 7, rgb_to_uint32(128, 128, 128));
+		for (size_t life_count = 0; life_count < game.player.life; life_count++) {
+			buffer_sprite_draw(&buffer, player_sprite, 44 + life_count * 14, 7, rgb_to_uint32(128, 0, 0));
+		}
 
 		for (size_t i = 0; i < game.width; i++) {
-			buffer.data[game.width * 16 + i] = rgb_to_uint32(128, 0, 0);
+			buffer.data[game.width * 16 + i] = rgb_to_uint32(128, 128, 128);
 		}
 
 		for (size_t ai = 0; ai < game.num_aliens; ai++) {
@@ -488,32 +474,32 @@ int main(int argc, char* argv[]) {
 
 			const Alien& alien = game.aliens[ai];
 			if (alien.type == ALIEN_DEAD) {
-				buffer_sprite_draw(&buffer, alien_death_sprite , alien.x, alien.y, rgb_to_uint32(128, 0, 0));
+				buffer_sprite_draw(&buffer, alien_death_sprite , alien.x, alien.y, rgb_to_uint32(0, 128, 0));
 			} else {
 				const SpriteAnimation& animation = alien_animation[alien.type - 1];
 				size_t current_frame = animation.time / animation.frame_duration;
 				const Sprite& sprite = *animation.frames[current_frame];
-				buffer_sprite_draw(&buffer, sprite, alien.x, alien.y, rgb_to_uint32(128, 0, 0));
+				buffer_sprite_draw(&buffer, sprite, alien.x, alien.y, rgb_to_uint32(0, 128, 0));
 			}
 		}
 
-		for (size_t bi = 0; bi < game.num_bullets; bi++) { //draw a num_bullets bullets
+		for (size_t bi = 0; bi < game.num_bullets; bi++) { //draw num_bullets bullets
 			const Bullet& bullet = game.bullets[bi];
 			const Sprite& sprite = bullet_sprite;
-			buffer_sprite_draw(&buffer, sprite, bullet.x, bullet.y, rgb_to_uint32(128, 0, 0));
+			buffer_sprite_draw(&buffer, sprite, bullet.x, bullet.y, rgb_to_uint32(128, 128, 128));
 		}
 
 		for (size_t bi = 0; bi < game.num_bullets;) { //remove any projectiles that move out of the area by overwriting it with last element in array
 			game.bullets[bi].y += game.bullets[bi].dir;
+			bool player_bullet = game.bullets[bi].dir > 0;
+
 			if (game.bullets[bi].y >= game.height || game.bullets[bi].y < bullet_sprite.height) {
-				if (game.bullets[bi].dir > 0) game.num_player_bullets--;
+				if (player_bullet) game.num_player_bullets--;
+				else game.num_alien_bullets--;
 				game.bullets[bi] = game.bullets[game.num_bullets - 1];
 				game.num_bullets--;
 				continue;
 			}
-			bool player_bullet;
-			player_bullet = game.bullets[bi].dir > 0;
-
 			for (size_t ai = 0; ai < game.num_aliens; ai++) {
 				const Alien& alien = game.aliens[ai];
 				if (alien.type == ALIEN_DEAD) continue;
@@ -521,19 +507,31 @@ int main(int argc, char* argv[]) {
 				const SpriteAnimation& animation = alien_animation[alien.type - 1];
 				size_t current_frame = animation.time / animation.frame_duration;
 				const Sprite& alien_sprite = *animation.frames[current_frame];
-				bool overlap = sprite_overlap_check(bullet_sprite, game.bullets[bi].x, game.bullets[bi].y, alien_sprite, alien.x, alien.y);
-				if (overlap && player_bullet) {
+				bool alien_overlap = sprite_overlap_check(bullet_sprite, game.bullets[bi].x, game.bullets[bi].y, alien_sprite, alien.x, alien.y);
+				if (alien_overlap && player_bullet) {
 					score += 10 * (4 - game.aliens[ai].type);
 					game.aliens[ai].type = ALIEN_DEAD;
 					game.aliens[ai].x -= (alien_death_sprite.width - alien_sprite.width) / 2; //recenter death animation
 					game.bullets[bi] = game.bullets[game.num_bullets - 1];
 					game.num_player_bullets--;
 					game.num_bullets--;
-					continue;
+					break; //break to prevent a bug that would overlap multiple aliens with the same bullet, messing up bullet counts
 				}
 			}
+
+			bool player_overlap = sprite_overlap_check(bullet_sprite, game.bullets[bi].x, game.bullets[bi].y, player_sprite, game.player.x, game.player.y);
+			if (player_overlap && !player_bullet) {
+				game.player.life--; //if player gets hit by alien bullet they lose a life
+				game.bullets[bi] = game.bullets[game.num_bullets - 1];
+				game.num_alien_bullets--;
+				game.num_bullets--;
+				printf("%d\n", (int)game.player.life);
+			}
+			if (game.player.life == 0) game_running = false; //if player loses all lives game is over
 			bi++;
 		}
+
+
 
 		buffer_sprite_draw(&buffer, player_sprite, game.player.x, game.player.y, rgb_to_uint32(128, 0, 0));
 		
@@ -579,41 +577,32 @@ int main(int argc, char* argv[]) {
 			game.bullets[game.num_bullets].dir = 2;
 			game.num_bullets++;
 			game.num_player_bullets++;
-			printf("%d\n", (int)game.num_player_bullets);
 		}
 		fire_pressed = false;
 		
-		if (alien_fire && !aliens_dead) { //similar to player firing bullet, except we have a random (living) alien fire the bullet after a set interval
+		if (game.num_alien_bullets < 1 && !aliens_dead) { //similar to player firing bullet, except we have a random (living) alien fire the bullet after a set interval
 			int rand_alien_index = rand();
-			rand_alien_index = abs(rand_alien_index) % 54;
+			rand_alien_index = abs(rand_alien_index) % 55;
 			int original_index = rand_alien_index;
 			Alien rand_alien = game.aliens[rand_alien_index];
 			while (rand_alien.type == 0) {
-				rand_alien_index = (rand_alien_index + 1) % 54;
+				rand_alien_index = (rand_alien_index + 1) % 55;
 				rand_alien = game.aliens[rand_alien_index];
 				if (rand_alien_index == original_index) {
-					printf("all dead\n");
+					printf("All dead, you win!\n");
 					aliens_dead = true;
 					break; //if we complete a full loop of the alien array and all are dead, none will be able to fire so we break
 				}
 			}
-			if (!aliens_dead) { 
+			if (!aliens_dead) {
 				game.bullets[game.num_bullets].x = rand_alien.x;
+				if (rand_alien.type == 1) game.bullets[game.num_bullets].x += 4;		//--->since different alien types have different width,
+				else game.bullets[game.num_bullets].x += 6;								//		recenter bullet depending on type of alien
 				game.bullets[game.num_bullets].y = rand_alien.y;
 				game.bullets[game.num_bullets].dir = -2;
 				game.num_bullets++;
+				game.num_alien_bullets++;
 			}
-		}
-		alien_fire = false;
-
-		clock_t end = clock();
-		alien_clock += (double)(end - start) / CLOCKS_PER_SEC;
-
-		//printf("%d\n", (int)game.num_bullets);
-		
-		if (alien_clock >= 1.0) { //fire a bullet every second (turn this up too high and program will crash so don't do that)
-			alien_fire = true;
-			alien_clock -= 1.0;
 		}
 	}
 
@@ -628,7 +617,9 @@ int main(int argc, char* argv[]) {
 	delete[] alien_sprites[3].data;
 	delete[] alien_sprites[4].data;
 	delete[] alien_sprites[5].data;
-
+	delete[] text_spritesheet.data;
+	delete[] alien_death_sprite.data;
+	delete[] game.aliens;
 	delete[] player_sprite.data;
 	delete[] buffer.data;
 
