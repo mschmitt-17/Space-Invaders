@@ -10,8 +10,6 @@
 
 #define GAME_MAX_BULLETS	3
 
-//changes to make still: hit detection for alien bullets, player lives, victory/loss screens, bunkers
-
 struct Alien {
 	size_t x, y; //x, y are pixels from the bottom left corner of the screen
 	uint8_t type;
@@ -45,8 +43,9 @@ struct Game { //this struct holds all game related variables
 	Bullet bullets[GAME_MAX_BULLETS + 1];
 };
 
-bool game_running = false; //game_running will allow the game to be quit when the esc key is pressed
+bool game_running = false; //game_running will allow the game to be quit when the esc key is pressed (and we also use it to exit out of the main loop for a win/loss)
 int move_dir = 0; //variable for player movement direction (+1 is right arrow, -1 is left arrow)
+int alien_move_dir = 1; //similar to player movement, but we will set this one depending on alien positions and not user input
 bool fire_pressed = 0; //boolean for if firing button (space) was pressed
 
 void error_callback(int error, const char* description) {
@@ -447,18 +446,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	game_running = true;
-
+	bool aliens_dead = false;
 	uint32_t clear_color = rgb_to_uint32(0, 0, 0);
 
-	bool aliens_dead = false;
-
 	while (!glfwWindowShouldClose(window) && game_running) {
-		clock_t start = clock();
+		buffer_clear(&buffer, clear_color); //sets color to clear color, which is black
 
-		buffer_clear(&buffer, clear_color); //sets color to clear color, which is green
-
-		buffer_draw_text(&buffer, text_spritesheet, "SCORE", 4, game.height - text_spritesheet.height - 7, rgb_to_uint32(128, 128, 128));
-		buffer_draw_number(&buffer, number_spritesheet, score, 4 + 2 * number_spritesheet.width, game.height - 2 * number_spritesheet.height - 12, rgb_to_uint32(128, 128, 128));
+		buffer_draw_text(&buffer, text_spritesheet, "SCORE", 8, game.height - text_spritesheet.height - 7, rgb_to_uint32(128, 128, 128));
+		buffer_draw_number(&buffer, number_spritesheet, score, 8 + 2 * number_spritesheet.width, game.height - 2 * number_spritesheet.height - 12, rgb_to_uint32(128, 128, 128));
 		buffer_draw_text(&buffer, text_spritesheet, "CREDIT 00", 164, 7, rgb_to_uint32(128, 128, 128));
 		buffer_draw_text(&buffer, text_spritesheet, "LIVES", 8, 7, rgb_to_uint32(128, 128, 128));
 		for (size_t life_count = 0; life_count < game.player.life; life_count++) {
@@ -469,17 +464,40 @@ int main(int argc, char* argv[]) {
 			buffer.data[game.width * 16 + i] = rgb_to_uint32(128, 128, 128);
 		}
 
-		for (size_t ai = 0; ai < game.num_aliens; ai++) {
-			if (!death_counters[ai]) continue; //if death counters is 0 we skip over the alien
+		bool change_alien_move_dir = false;
 
-			const Alien& alien = game.aliens[ai];
-			if (alien.type == ALIEN_DEAD) {
-				buffer_sprite_draw(&buffer, alien_death_sprite , alien.x, alien.y, rgb_to_uint32(0, 128, 0));
-			} else {
-				const SpriteAnimation& animation = alien_animation[alien.type - 1];
-				size_t current_frame = animation.time / animation.frame_duration;
-				const Sprite& sprite = *animation.frames[current_frame];
-				buffer_sprite_draw(&buffer, sprite, alien.x, alien.y, rgb_to_uint32(0, 128, 0));
+		for (size_t ai = 0; ai < game.num_aliens; ai++) {
+			bool skip = false;			//use this boolean so we can still use edge aliens as bounds even after they die (we will only skip the sprite draw)
+
+			if (!death_counters[ai]) skip = true; //if death counters is 0 we skip over the alien
+
+			Alien& alien = game.aliens[ai];
+			if (!skip) {
+				if (alien.type == ALIEN_DEAD) {
+					buffer_sprite_draw(&buffer, alien_death_sprite, alien.x, alien.y, rgb_to_uint32(0, 128, 0));
+				}
+				else {
+					const SpriteAnimation& animation = alien_animation[alien.type - 1];
+					size_t current_frame = animation.time / animation.frame_duration;
+					const Sprite& sprite = *animation.frames[current_frame];
+					buffer_sprite_draw(&buffer, sprite, alien.x, alien.y, rgb_to_uint32(0, 128, 0));
+				}
+			}
+			alien.x += alien_move_dir;
+			if (ai == 10 || ai == 0) { //we put this loop before the death counter check so even if alien 10 or 0 are dead, they still act as bounds
+				if (alien.x >= 211 || alien.x <= 1) {
+					change_alien_move_dir = true; //we need this boolean so direction doesn't change while we're still iterating through aliens
+				}
+			}
+		}
+		if (change_alien_move_dir) {
+			alien_move_dir *= -1;
+			for (size_t ai = 0; ai < game.num_aliens; ai++) {
+				Alien& alien = game.aliens[ai];
+				alien.y -= 1; //make aliens move closer
+				if (alien.y <= 38 && alien.type != 0) { //if aliens get close enough where player can't shoot them, game is over 
+					game_running = false;
+				}
 			}
 		}
 
@@ -511,6 +529,7 @@ int main(int argc, char* argv[]) {
 				if (alien_overlap && player_bullet) {
 					score += 10 * (4 - game.aliens[ai].type);
 					game.aliens[ai].type = ALIEN_DEAD;
+					printf("dead: %d\n", (int)ai);
 					game.aliens[ai].x -= (alien_death_sprite.width - alien_sprite.width) / 2; //recenter death animation
 					game.bullets[bi] = game.bullets[game.num_bullets - 1];
 					game.num_player_bullets--;
@@ -525,7 +544,6 @@ int main(int argc, char* argv[]) {
 				game.bullets[bi] = game.bullets[game.num_bullets - 1];
 				game.num_alien_bullets--;
 				game.num_bullets--;
-				printf("%d\n", (int)game.player.life);
 			}
 			if (game.player.life == 0) game_running = false; //if player loses all lives game is over
 			bi++;
@@ -589,9 +607,9 @@ int main(int argc, char* argv[]) {
 				rand_alien_index = (rand_alien_index + 1) % 55;
 				rand_alien = game.aliens[rand_alien_index];
 				if (rand_alien_index == original_index) {
-					printf("All dead, you win!\n");
 					aliens_dead = true;
-					break; //if we complete a full loop of the alien array and all are dead, none will be able to fire so we break
+					game_running = false; //if we complete a full loop of the alien array and all are dead, the player has won so we stop the game
+					break;
 				}
 			}
 			if (!aliens_dead) {
@@ -603,6 +621,38 @@ int main(int argc, char* argv[]) {
 				game.num_bullets++;
 				game.num_alien_bullets++;
 			}
+		}
+	}
+
+	double game_over_time = 0.0;
+
+	if (aliens_dead) {
+		while (game_over_time < 10.0) { //keep game over screen open for 10 seconds
+			clock_t start = clock();
+			buffer_clear(&buffer, clear_color);
+			buffer_draw_text(&buffer, text_spritesheet, "YOU WIN!", 92, 122, rgb_to_uint32(128, 128, 128));
+
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, buffer.width, buffer.height, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, buffer.data);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+			glfwSwapBuffers(window);
+			glfwPollEvents();
+
+			clock_t end = clock();
+			game_over_time += ((double)(end - start)) / CLOCKS_PER_SEC;
+		}
+	} else {
+		while (game_over_time < 10.0) { //keep game over screen open for 10 seconds
+			clock_t start = clock();
+			buffer_clear(&buffer, clear_color);
+			buffer_draw_text(&buffer, text_spritesheet, "GAME OVER", 89, 122, rgb_to_uint32(128, 128, 128));
+
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, buffer.width, buffer.height, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, buffer.data);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+			glfwSwapBuffers(window);
+			glfwPollEvents();
+
+			clock_t end = clock();
+			game_over_time += ((double)(end - start)) / CLOCKS_PER_SEC;
 		}
 	}
 
